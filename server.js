@@ -69,47 +69,51 @@ server.post("/api/zip", (req, res) => {
 									res.status(500).send("File attribute error");
 								} else {
 
-									docClient.get(
-										{
-											TableName: table,
-											Key: { username: username }
-										}, (err, userData) => {
-											if (err) {
-												res.status(500).send("User data search error");
-											} else {
-												//console.log(userData);
-												userData.Item.zipFiles.push({
-													name: filename,
-													path: "zipFiles/usersFiles/" + filename,
-													size: stats.size
-												})
+									mv(filename, 'zipFiles/usersFiles/' + filename, (err) => {
+										if (!err) {
+											console.log(err)
+											return;
+										}
 
-												docClient.update({
-													TableName: table,
-													Key: {
-														username: username
-													},
-													UpdateExpression: "SET zipFiles = :zipFiles",
-													ExpressionAttributeValues: {
-														":zipFiles": userData.Item.zipFiles
-													},
-													ReturnValues: "ALL_NEW"
-												}, (err, updateData) => {
-													if (err) {
-														status.status(500).send("Update error");
-													} else {
-														res.status(200).send(Object.assign(userData.Item, { filesList: allFilesList }));
+										docClient.get(
+											{
+												TableName: table,
+												Key: { username: username }
+											}, (err, userData) => {
+												if (err) {
+													res.status(500).send("User data search error");
+												} else {
+													//console.log(userData);
+													userData.Item.zipFiles.push({
+														name: filename,
+														path: "zipFiles/usersFiles/" + filename,
+														size: stats.size
+													})
 
-													}
-												})
-											}
-										})
+													docClient.update({
+														TableName: table,
+														Key: {
+															username: username
+														},
+														UpdateExpression: "SET zipFiles = :zipFiles",
+														ExpressionAttributeValues: {
+															":zipFiles": userData.Item.zipFiles
+														},
+														ReturnValues: "ALL_NEW"
+													}, (err, updateData) => {
+														if (err) {
+															status.status(500).send("Update error");
+														} else {
+															res.status(200).send(Object.assign(userData.Item, { filesList: allFilesList }));
+
+														}
+													})
+												}
+											})
+									});
 								}
 							});
-							mv(filename, 'zipFiles/usersFiles/' + filename, (err) => {
-								if (!err)
-									console.log(err)
-							});
+
 						}
 					});
 				}
@@ -228,7 +232,7 @@ server.post('/app/deleteFile', (req, res) => {
 		var params = {
 			TableName: table,
 			Key: {
-				username: "priyesh@gmail.com"
+				username: username
 			}
 		};
 
