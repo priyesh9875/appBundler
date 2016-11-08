@@ -1,6 +1,5 @@
 var gulp = require('gulp');
 var webpack = require('webpack-stream');
-var serve = require('gulp-serve');
 var express = require('express');
 var path = require('path');
 var gulpSequence = require('gulp-sequence');

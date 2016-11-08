@@ -89,7 +89,7 @@ class LoginPage extends React.Component {
     return (
       <div  >
         <div style={styles.loginContainer}>
-          <h1 style={styles.textHead}>Ryu WebConsole LogIn   </h1>
+          <h1 style={styles.textHead}>AppBundler LogIn   </h1>
           <Paper style={styles.paper}>
 
             <form>
@@ -101,7 +101,7 @@ class LoginPage extends React.Component {
                 onChange={this.handleUsernameInput.bind(this) } />
               <TextField
                 hintText="Password"
-                floatingLabelText="Passwasdasdsaord"
+                floatingLabelText="Password"
                 fullWidth={true}
                 type="password"
                 value={this.state.password}
