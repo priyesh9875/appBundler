@@ -30,13 +30,13 @@ class MyFiles extends Component {
   }
 
   handleDownload(path) {
-    var win = window.open("/app/download?filePath=" + path, '_blank');
+    var win = window.open(path, '_blank');
     win.focus();
   }
 
-  handleFileDelete(path, name, size) {
+  handleFileDelete(filename, name, size) {
     $.post("/app/deleteFile", {
-      filePath: path,
+      filename: filename,
       username: this.props.user.username,
       password: this.props.user.password,
     })
@@ -67,7 +67,7 @@ class MyFiles extends Component {
                 <FileDownload />
               </IconButton>
               <span>       </span>
-              <IconButton tooltip={"Delete"} onClick={this.handleFileDelete.bind(this, item.path, item.name, item.size) }>
+              <IconButton tooltip={"Delete"} onClick={this.handleFileDelete.bind(this, item.name) }>
                 <FileCancelDelete/>
               </IconButton>
             </div> }

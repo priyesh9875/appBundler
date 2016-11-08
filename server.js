@@ -1,4 +1,3 @@
-var mv = require('mv');
 var express = require('express');
 var path = require('path');
 var webpack = require('webpack-stream');
@@ -8,15 +7,13 @@ var copy = require('copy');
 const del = require('del');
 const fs = require('fs');
 
-const AWS = require('aws-sdk');
-AWS.config.update({
-    region: "ap-south-1",
-    endpoint: "https://dynamodb.ap-south-1.amazonaws.com"
-});
+var dynamodb = require('./dynamodb');
+var storage = require('./storage');
 
-var docClient = new AWS.DynamoDB.DocumentClient();
+
 
 var table = "appBundlerUsers1";
+var bucket = "appbundler";
 
 var allFilesList = [];
 var dirFiles = fs.readdirSync("./zipFiles/src/")
@@ -26,9 +23,6 @@ for (file in dirFiles) {
 	obj["name"] = dirFiles[file]
 	allFilesList.push(obj);
 }
-
-
-
 
 // Server
 var server = express();
@@ -62,66 +56,67 @@ server.post("/api/zip", (req, res) => {
 					// or save the zipped file to disk
 					zipped.save(filename, function (error) {
 						if (!error) {
-							//console.log("saved successfully !");
+							console.log("saved successfully !");
 							fs.stat(filename, (err, stats) => {
 								// console.log(stats);
 								if (err) {
 									res.status(500).send("File attribute error");
 								} else {
 
-									mv(filename, 'zipFiles/usersFiles/' + filename, (err) => {
-										if (!err) {
-											console.log(err)
-											return;
-										}
-
-										docClient.get(
-											{
-												TableName: table,
-												Key: { username: username }
-											}, (err, userData) => {
+									storage.putObject("appbundler", filename, filename,
+										(uploadRes) => {
+											fs.unlink(filename, (err) => {
 												if (err) {
-													res.status(500).send("User data search error");
-												} else {
-													//console.log(userData);
-													userData.Item.zipFiles.push({
-														name: filename,
-														path: "zipFiles/usersFiles/" + filename,
-														size: stats.size
-													})
-
-													docClient.update({
-														TableName: table,
-														Key: {
-															username: username
-														},
-														UpdateExpression: "SET zipFiles = :zipFiles",
-														ExpressionAttributeValues: {
-															":zipFiles": userData.Item.zipFiles
-														},
-														ReturnValues: "ALL_NEW"
-													}, (err, updateData) => {
-														if (err) {
-															status.status(500).send("Update error");
-														} else {
-															res.status(200).send(Object.assign(userData.Item, { filesList: allFilesList }));
-
-														}
-													})
+													return;
 												}
 											})
-									});
+											console.log("upload success: ", uploadRes)
+
+											dynamodb.get({
+												TableName: table,
+												Key: { username: username }
+											}, (userData) => {
+
+												userData.Item.zipFiles.push({
+													name: filename,
+													path: "https://s3.ap-south-1.amazonaws.com/" + bucket + "/" + filename,
+													size: stats.size
+												})
+
+												dynamodb.update({
+													TableName: table,
+													Key: {
+														username: username
+													},
+													UpdateExpression: "SET zipFiles = :zipFiles",
+													ExpressionAttributeValues: {
+														":zipFiles": userData.Item.zipFiles
+													},
+													ReturnValues: "ALL_NEW"
+												}, (updateSuccess) => {
+													res.status(200).send(Object.assign(userData.Item, { filesList: allFilesList }));
+													return;
+
+												}, (updateError) => {
+													res.status(500).send("Update error");
+													return;
+												})
+											})
+										}, (uploadError) => {
+											res.status(500).send("S3 put error ");
+											return;
+										}
+									)
 								}
-							});
-
+							})
 						}
-					});
+					})
 				}
-			});
-		});
+			})
+		})
 	})
-
 })
+
 
 
 server.post('/api/login', (req, res) => {
@@ -136,81 +131,64 @@ server.post('/api/login', (req, res) => {
 		res.status(401).send();
 	} else if (username === password) {
 
-		docClient.scan(scanTable, function (err, userData) {
-			if (err) {
-				console.error("Unable to add item. Error JSON:", JSON.stringify(err, null, 2));
-				res.status(500).send("Database scan error");
-			} else {
-				// finding in userData
+		dynamodb.scan(scanTable,
+			(successScan) => {
+
 				var found = false;
-				userData.Items.map(value => {
+				successScan.Items.map(value => {
+
 					if (value.username == username) {
 						found = true;
 						console.log("Old user %s", username);
 						res.status(200).send(Object.assign({}, value, { filesList: allFilesList }));
+						return;
 					}
-				});
+				})
 
 				if (!found) {
 					// No user found
 					// console.log("No use found");
 					var user = {
 						name: username.split('@')[0],
-						id: userData.Count + 1,
+						id: successScan.Count + 1,
 						username: username,
 						password: password,
 						zipFiles: [],
 					};
-
 
 					var params = {
 						TableName: table,
 						Item: user
 					};
 
-					// console.log("Adding a new item...");
-					docClient.put(params, function (err, insertedUser) {
-						if (err) {
-							console.error("Unable to add item. Error JSON:", JSON.stringify(err, null, 2));
-							res.status(500).send("Register error");
-						} else {
-							console.log("New user with username: %s", username);
-							res.status(200).send(Object.assign({}, user, { filesList: allFilesList }));
-						}
-					});
-				}
-			}
-		});
+					// console.log("Putting new item");
+					dynamodb.put(params, (successPut) => {
+						console.log("New user with username: %s", username);
+						res.status(200).send(Object.assign({}, user, { filesList: allFilesList }));
 
+					}, (errorPut) => {
+						console.error("Unable to add item. Error JSON:", JSON.stringify(errorPut, null, 2));
+						res.status(500).send("Register error");
+					})
+
+				}
+			},
+			(errorScan) => {
+				if (err) {
+					console.error("Unable to scan Error JSON:", JSON.stringify(err, null, 2));
+					res.status(500).send("Database scan error");
+					return;
+				}
+			})
 	} else {
 		res.status(402).send();
 	}
 
 });
 
-server.get('/app/download', (req, res) => {
-
-	if (!req.query.filePath) {
-		res.status(404).send("No file specified!")
-	} else {
-		var filePath = "./" + req.query.filePath;
-		console.log(filePath)
-
-		fs.stat(filePath, (err, stat) => {
-			if (err) {
-				res.status(404).send("File not found!")
-			} else {
-				res.download(filePath);
-			}
-		})
-	}
-
-})
-
-
 server.post('/app/deleteFile', (req, res) => {
 
-	var filePath = req.body.filePath;
+	var filename = req.body.filename;
 	var username = req.body.username;
 	var password = req.body.password;
 
@@ -219,73 +197,61 @@ server.post('/app/deleteFile', (req, res) => {
 		return;
 	}
 
-	if (!filePath) {
+	if (!filename) {
 		res.status(404).send("No file specified!");
 		return;
 	}
 
-	fs.stat(filePath, (err, stat) => {
-		if (err) {
-			res.status(404).send("File not found!")
+	var params = {
+		TableName: table,
+		Key: {
+			username: username
+		}
+	};
+
+	dynamodb.get(params, (successGet) => {
+		var index = -1;
+		for (var i = 0; i < successGet.Item.zipFiles.length; i++) {
+			if (successGet.Item.zipFiles[i].name = filename) {
+				successGet.Item.zipFiles.splice(i, 1)
+				index = i;
+				break;
+			}
+		}
+
+		if (index == -1) {
+			res.status(200).send("Already deleted from database. I dont know about server storage")
 			return;
 		}
-		var params = {
-			TableName: table,
-			Key: {
-				username: username
-			}
-		};
 
-		docClient.get(params, function (err, userData) {
-			if (err) {
-				res.status(500).send("Contact Delete error");
-				return;
-			}
-
-			var index = -1;
-
-			for (var i = 0; i < userData.Item.zipFiles.length; i++) {
-				if (userData.Item.zipFiles[i].path = filePath) {
-					userData.Item.zipFiles.splice(i, 1)
-					index = i;
-					break;
-				}
-			}
-
-			if (index == -1) {
-				res.status(200).send("already deleted from database. I dont know about server storage")
-				return;
-			}
-
-			docClient.update({
-				TableName: table,
-				Key: {
-					username: username
+		storage.deleteObject(bucket, filename,
+			(successDelete) => {
+				console.log("Delete from storage: " + filename);
+				dynamodb.update({
+					TableName: table,
+					Key: {
+						username: username
+					},
+					UpdateExpression: "SET zipFiles = :zipFiles",
+					ExpressionAttributeValues: {
+						":zipFiles": successGet.Item.zipFiles
+					},
+					ReturnValues: "ALL_NEW"
 				},
-				UpdateExpression: "SET zipFiles = :zipFiles",
-				ExpressionAttributeValues: {
-					":zipFiles": userData.Item.zipFiles
-				},
-				ReturnValues: "ALL_NEW"
-			}, (err, updateData) => {
-				if (err) {
-					status.status(500).send("Update error");
-					return;
-				} else {
-					fs.unlink(filePath, (err) => {
-						if (err) {
-							return;
-						} else {
-							res.status(200).send(Object.assign(userData.Item, { filesList: allFilesList }));
-							return;
-						}
+					(successUpdate) => {
+						res.status(200).send(Object.assign(successGet.Item, { filesList: allFilesList }));
+
+					}, (errorUpdate) => {
+						status.status(500).send("Delete Update error");
+						return;
 					})
-				}
-			})
-		});
+			},
+			(errorDelete) => {
+				res.status(500).send("S3 delete error");
+				return;
+			});
 	})
-})
-
+});
 
 server.get('/*', (req, res) => {
 	res.sendFile(path.resolve(__dirname, "src/index.html"));
